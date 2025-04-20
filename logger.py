@@ -1,10 +1,9 @@
-# logger.py
-
 import pandas as pd
 import os
 from datetime import datetime
 
-LOG_PATH = "prediction_log.csv"
+# Save log file relative to this script's location
+LOG_PATH = os.path.join(os.path.dirname(__file__), "prediction_log.csv")
 
 def load_log():
     if os.path.exists(LOG_PATH):
@@ -21,7 +20,6 @@ def log_prediction(input_dict, predicted_ctr):
     new_row["predicted_ctr"] = predicted_ctr
     new_row["timestamp"] = datetime.now().isoformat()
 
-    # Ensure column order
     new_row_ordered = {
         "timestamp": new_row.get("timestamp"),
         "hour": new_row.get("hour"),
