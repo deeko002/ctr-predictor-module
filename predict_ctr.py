@@ -9,9 +9,14 @@ import os
 model_path = os.path.join(os.path.dirname(__file__), "model", "ctr_model.txt")
 model = lgb.Booster(model_file=model_path)
 
-def predict_ctr(user_input: dict) -> float:
-    features = create_features(user_input)
-    return round(model.predict(features)[0], 6)
+def predict_ctr(input_dict):
+    features = create_features(input_dict)
+    prediction = round(model.predict(features)[0], 6)
+
+    # ✅ Log the prediction
+    log_prediction(input_dict, prediction)
+
+    return prediction
 
 # Example usage
 if __name__ == "__main__":
