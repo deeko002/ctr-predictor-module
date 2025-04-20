@@ -4,7 +4,10 @@ import lightgbm as lgb
 from feature_creator import create_features
 
 # Load trained model
-model = lgb.Booster(model_file='model/ctr_model.txt')
+import os
+
+model_path = os.path.join(os.path.dirname(__file__), "model", "ctr_model.txt")
+model = lgb.Booster(model_file=model_path)
 
 def predict_ctr(user_input: dict) -> float:
     features = create_features(user_input)
