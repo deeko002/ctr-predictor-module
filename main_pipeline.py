@@ -2,8 +2,11 @@ import pandas as pd
 import duckdb
 from feature_creator import create_features
 from predict_ctr import model
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
 
-# ⬇️ Required columns and defaults for fallback
+
+# Required columns and defaults for fallback
 REQUIRED_COLUMNS = ["hour", "banner_pos", "device_type", "device_model"]
 DEFAULT_ROW = {
     "hour": 1300,
