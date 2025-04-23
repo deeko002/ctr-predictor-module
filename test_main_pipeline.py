@@ -1,16 +1,13 @@
 from main_pipeline import run_sql_to_ctr_predictions
+from pyspark.sql import SparkSession
 
-# Sample SQL query like from NLP
-sql = """
-SELECT hour, COUNT(*) AS total_clicks, COUNT(*) / COUNT(*) AS ctr
+# Create dummy Spark session
+spark = SparkSession.builder.getOrCreate()
+
+# Sample SQL and DataFrame
+sql_query = """
+SELECT hour, banner_pos, device_type, device_model
 FROM avazu_df
-GROUP BY hour
-ORDER BY hour
+LIMIT 5
 """
 
-# Run it
-results = run_sql_to_ctr_predictions(sql)
-
-# Print predictions
-print("Predicted CTRs from SQL Query:")
-print(results)
