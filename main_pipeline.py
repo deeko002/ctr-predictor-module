@@ -1,9 +1,7 @@
 import pandas as pd
-import duckdb
+import lightgbm as lgb
 from feature_creator import create_features
-from predict_ctr import model
 
-# Required columns and fallback values
 REQUIRED_COLUMNS = ["hour", "banner_pos", "device_type", "device_model"]
 DEFAULT_ROW = {
     "hour": 1300,
@@ -12,40 +10,42 @@ DEFAULT_ROW = {
     "device_model": "model_abc"
 }
 
-def run_sql_to_ctr_predictions(sql_query, df):
-    """
-    Takes a SQL query string and a Spark or Pandas DataFrame,
-    runs the query using DuckDB, generates model-ready features,
-    and returns predicted CTR values.
-    """
+def run_sql_to_ctr_predictions(sql_query, spark_df):
     try:
-        # If Spark DF, convert to Pandas
-        if hasattr(df, "toPandas"):
-            df = df.toPandas()
+        # Register temp view for SQL querying
+        spark_df.createOrReplaceTempView("ctr_df")
 
-        # Run SQL using DuckDB
-        raw_df = duckdb.query_df(df, "avazu_df", sql_query).to_df()
+        # Run query and convert to Pandas
+        input_df = spark.sql(sql_query).toPandas()
 
-        if raw_df.empty:
-            return "No results from query."
+        # Fallback to default if SQL returns no rows
+        if input_df.empty:
+            input_df = pd.DataFrame([DEFAULT_ROW])
 
-        # Fill in missing model-required columns
+        # Fill missing required columns
         for col in REQUIRED_COLUMNS:
-            if col not in raw_df.columns:
-                raw_df[col] = DEFAULT_ROW[col]
+            if col not in input_df.columns:
+                input_df[col] = DEFAULT_ROW[col]
             else:
-                raw_df[col] = raw_df[col].fillna(DEFAULT_ROW[col])
+                input_df[col] = input_df[col].fillna(DEFAULT_ROW[col])
 
-        # Create model features
-        features_df = create_features(raw_df)
+        # Step 2: Feature Engineering
+        features_df = create_features(input_df)
 
-        # Predict CTR
-        ctr_preds = model.predict(features_df)
+        # Step 3: Load Model
+        booster = lgb.Booster(model_file="ctr_model.txt")
 
-        # Add prediction column
-        raw_df["predicted_ctr"] = ctr_preds
+        # Step 4: Predict
+        preds = booster.predict(features_df)
+        input_df["predicted_ctr"] = preds
 
-        return raw_df[["hour", "banner_pos", "device_type", "device_model", "predicted_ctr"]]
+        # Step 5: Group by device_type (or return all predictions if no group)
+        if "device_type" in input_df.columns:
+            result_df = input_df.groupby("device_type")["predicted_ctr"].mean().reset_index()
+        else:
+            result_df = input_df[["predicted_ctr"]]
+
+        return result_df
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        return pd.DataFrame({"error": [f"Error: {str(e)}"]})
