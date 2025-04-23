@@ -2,9 +2,10 @@ from main_pipeline import run_sql_to_ctr_predictions
 
 # Sample SQL query like from NLP
 sql = """
-SELECT hour, banner_pos, device_type, device_model
+SELECT hour, COUNT(*) AS total_clicks, COUNT(*) / COUNT(*) AS ctr
 FROM avazu_df
-LIMIT 5
+GROUP BY hour
+ORDER BY hour
 """
 
 # Run it

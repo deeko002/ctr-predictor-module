@@ -1,5 +1,3 @@
-# feature_creator.py
-
 import pandas as pd
 import hashlib
 import json
@@ -39,12 +37,12 @@ def create_features(raw):
     else:
         raise ValueError("Input must be dict or DataFrame")
 
-    # Fill missing columns with default values
+    # Ensure required columns exist and fill with defaults if missing or empty
     for col, default_val in DEFAULTS.items():
         if col not in df.columns:
             df[col] = default_val
         else:
-            df[col] = df[col].fillna(default_val)
+            df[col] = df[col].apply(lambda x: default_val if pd.isna(x) or x == "" or x is None else x)
 
     # Time-based features
     df['hour_of_day'] = df['hour'].astype(str).str[-2:].astype(int)
@@ -65,17 +63,16 @@ def create_features(raw):
     df['banner_x_device'] = df['banner_pos'].astype(str) + "_" + df['device_type'].astype(str)
     df['banner_x_device_hash'] = df['banner_x_device'].apply(lambda x: hash_category(x, mod=100_000))
 
-    # Return numeric features only
+    # Return numeric model-ready features only
     expected_features = [
-    'hour_of_day',
-    'day_of_week',
-    'banner_pos',
-    'device_type',
-    'device_model_hash',
-    'device_model_ctr',
-    'device_type_ctr',
-    'banner_x_device_hash'
+        'hour_of_day',
+        'day_of_week',
+        'banner_pos',
+        'device_type',
+        'device_model_hash',
+        'device_model_ctr',
+        'device_type_ctr',
+        'banner_x_device_hash'
     ]
-    
-    return df[expected_features]
 
+    return df[expected_features]
