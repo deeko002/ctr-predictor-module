@@ -25,7 +25,7 @@ _booster = None
 def _load_model():
     global _booster
     if _booster is None:
-        _booster = lgb.Booster(model_file="model/ctr_model.txt")
+        _booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
 
 
 def run_sql_to_ctr_predictions(sql_query: str, spark_df) -> pd.DataFrame:
