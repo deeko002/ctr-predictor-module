@@ -19,12 +19,14 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
 
         # Run SQL
         input_df = spark.sql(sql_query).toPandas()
+        user_requested_cols = input_df.columns.tolist()
 
         # Fallback: use default row if SQL result is empty
         if input_df.empty:
             input_df = pd.DataFrame([DEFAULT_ROW])
+            user_requested_cols = list(DEFAULT_ROW.keys())
 
-        # Ensure required features exist
+        # Ensure required features for model exist
         for col in REQUIRED_COLUMNS:
             if col not in input_df.columns:
                 input_df[col] = DEFAULT_ROW[col]
@@ -34,14 +36,15 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
         # Feature Engineering
         features_df = create_features(input_df)
 
-        # Load trained model
+        # Load model
         booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
 
         # Predict
         preds = booster.predict(features_df)
         input_df["predicted_ctr"] = preds
 
-        return input_df  # return full input + predictions
+        # ✅ Return only what was asked for + predicted CTR
+        return input_df[user_requested_cols + ["predicted_ctr"]]
 
     except Exception as e:
         return pd.DataFrame({"error": [f" Error: {str(e)}"]})
