@@ -5,11 +5,14 @@ import lightgbm as lgb
 from feature_creator import create_features
 
 import openai
+import os
 
 # ——— OPENAI SETUP ———
-# Replace with your own key (or set via env var and read os.getenv)
-api_key = "<YOUR_OPENAI_API_KEY_HERE>"
-client  = openai.OpenAI(api_key=api_key)
+# Read your key from the environment
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise RuntimeError("Please set the OPENAI_API_KEY environment variable")
+client = openai.OpenAI(api_key=api_key)
 
 # ——— MODEL CONFIG ———
 REQUIRED_COLUMNS     = ["hour", "banner_pos", "device_type", "device_model"]
