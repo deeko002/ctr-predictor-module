@@ -21,12 +21,12 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
         input_df = spark.sql(sql_query).toPandas()
         user_requested_cols = input_df.columns.tolist()
 
-        # Fallback: use default row if SQL result is empty
+        # Fallback if SQL returns nothing
         if input_df.empty:
             input_df = pd.DataFrame([DEFAULT_ROW])
             user_requested_cols = list(DEFAULT_ROW.keys())
 
-        # Ensure required features for model exist
+        # Ensure all model-required features exist
         for col in REQUIRED_COLUMNS:
             if col not in input_df.columns:
                 input_df[col] = DEFAULT_ROW[col]
@@ -39,15 +39,18 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
         # Load model
         booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
 
-        # Predict
-        preds = booster.predict(features_df)
-        
+        # Drop existing predicted_ctr if exists
         if "predicted_ctr" in input_df.columns:
             input_df = input_df.drop(columns=["predicted_ctr"])
-        
+
+        # Predict
+        preds = booster.predict(features_df)
         input_df["predicted_ctr"] = preds
 
-        # ✅ Return only what was asked for + predicted CTR
+        # ✅ Prevent duplicate column name during slicing
+        if "predicted_ctr" in user_requested_cols:
+            user_requested_cols.remove("predicted_ctr")
+
         return input_df[user_requested_cols + ["predicted_ctr"]]
 
     except Exception as e:
