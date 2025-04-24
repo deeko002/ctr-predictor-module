@@ -41,6 +41,10 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
 
         # Predict
         preds = booster.predict(features_df)
+        
+        if "predicted_ctr" in input_df.columns:
+            input_df = input_df.drop(columns=["predicted_ctr"])
+        
         input_df["predicted_ctr"] = preds
 
         # ✅ Return only what was asked for + predicted CTR
