@@ -35,7 +35,7 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
         features_df = create_features(input_df)
 
         # Load trained model
-        booster = lgb.Booster(model_file="C:/Users/dtaru/ctr-predictor-module/model/ctr_model.txt")
+        booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
 
         # Predict
         preds = booster.predict(features_df)
