@@ -14,45 +14,46 @@ DEFAULT_ROW = {
 
 def run_sql_to_ctr_predictions(sql_query, spark_df):
     try:
-        # Register Spark table for SQL execution
+        # Register Spark SQL table
         spark_df.createOrReplaceTempView("ctr_df")
 
-        # Step 1: Run SQL and track original requested columns
+        # Run SQL query
         input_df = spark.sql(sql_query).toPandas()
         user_requested_cols = input_df.columns.tolist()
 
-        # Step 2: Fallback to default row if query returns nothing
+        # Edge case 1: Empty result from SQL
         if input_df.empty:
             input_df = pd.DataFrame([DEFAULT_ROW])
             user_requested_cols = list(DEFAULT_ROW.keys())
 
-        # Step 3: Add missing required model input columns
+        # ✅ Edge case 2: Query returns aggregate (skip prediction)
+        # If all returned columns are numeric (and no inputs match model features), skip
+        if not any(col in input_df.columns for col in REQUIRED_COLUMNS):
+            input_df["predicted_ctr"] = None  # Optional: Placeholder
+            return input_df
+
+        # Fill required model features
         for col in REQUIRED_COLUMNS:
             if col not in input_df.columns:
                 input_df[col] = DEFAULT_ROW[col]
             else:
                 input_df[col] = input_df[col].fillna(DEFAULT_ROW[col])
 
-        # Step 4: Remove existing predicted_ctr-like columns (case-insensitive)
-        input_df.columns = [col.strip() for col in input_df.columns]  # normalize spacing
+        # Drop any existing predicted_ctr variant
+        input_df.columns = [col.strip() for col in input_df.columns]
         user_requested_cols = [col.strip() for col in user_requested_cols]
-
-        # Drop all case-insensitive duplicates of 'predicted_ctr'
         cols_to_drop = [col for col in input_df.columns if col.lower() == "predicted_ctr"]
         input_df = input_df.drop(columns=cols_to_drop, errors="ignore")
         user_requested_cols = [col for col in user_requested_cols if col.lower() != "predicted_ctr"]
 
-        # Step 5: Create model features
+        # Feature engineering
         features_df = create_features(input_df)
 
-        # Step 6: Load LightGBM model and predict
+        # Load model and predict
         booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
         preds = booster.predict(features_df)
-
-        # Step 7: Add model prediction column
         input_df["predicted_ctr"] = preds
 
-        # Step 8: Return only what was asked for + model prediction
         return input_df[user_requested_cols + ["predicted_ctr"]]
 
     except Exception as e:
