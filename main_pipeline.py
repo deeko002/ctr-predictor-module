@@ -7,36 +7,36 @@ SIMULATABLE_FEATURES = {
     "device_type", "app_category", "day_of_week", "hour_of_day", "banner_pos"
 }
 
-def run_sql_to_ctr_predictions(sql_query, spark_df):
+def run_sql_to_ctr_predictions(sql_query, spark_df, user_question: str = ""):
     try:
-        # Register Spark SQL view
+        # Step 0: Setup
         spark_df.createOrReplaceTempView("ctr_df")
         input_df = spark.sql(sql_query).toPandas()
         user_requested_cols = input_df.columns.tolist()
 
-        # Fallback if empty SQL result
+        # Step 1: Normalize column names
+        input_df.columns = [col.strip() for col in input_df.columns]
+        user_requested_cols = [col.strip() for col in user_requested_cols]
+
+        # Step 2: Remove any predicted_ctr column from SQL
+        input_df = input_df.drop(columns=[col for col in input_df.columns if col.lower() == "predicted_ctr"], errors="ignore")
+        user_requested_cols = [col for col in user_requested_cols if col.lower() != "predicted_ctr"]
+
+        # Step 3: Check if prediction was actually requested
+        predict_mode = any(kw in user_question.lower() for kw in ["predict", "predicted", "likely", "expected"])
+        if not predict_mode:
+            return input_df  # 🔕 Descriptive query — skip prediction
+
+        # Step 4: Handle empty SQL output
         if input_df.empty:
             input_df = pd.DataFrame([{col: None for col in REQUIRED_COLUMNS}])
             user_requested_cols = list(input_df.columns)
 
-        # Normalize columns
-        input_df.columns = [col.strip() for col in input_df.columns]
-        user_requested_cols = [col.strip() for col in user_requested_cols]
-
-        # Drop duplicate predicted_ctr if it exists
-        input_df = input_df.drop(columns=[col for col in input_df.columns if col.lower() == "predicted_ctr"], errors="ignore")
-        user_requested_cols = [col for col in user_requested_cols if col.lower() != "predicted_ctr"]
-
-        # ✅ CASE 0: Descriptive-only query — skip model
-        if not any(col in input_df.columns for col in REQUIRED_COLUMNS) and \
-           not any(col in input_df.columns for col in SIMULATABLE_FEATURES):
-            return input_df
-
-        # ✅ CASE 1: Row-wise prediction
+        # Step 5: CASE 1 — Row-level prediction
         if any(col in input_df.columns for col in REQUIRED_COLUMNS):
             for col in REQUIRED_COLUMNS:
                 if col not in input_df.columns:
-                    input_df[col] = spark_df.select(col).dropna().limit(1).toPandas().iloc[0, 0]  # smart fill
+                    input_df[col] = spark_df.select(col).dropna().limit(1).toPandas().iloc[0, 0]
                 else:
                     input_df[col] = input_df[col].fillna(spark_df.select(col).dropna().limit(1).toPandas().iloc[0, 0])
 
@@ -46,7 +46,7 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
             input_df["predicted_ctr"] = preds
             return input_df[user_requested_cols + ["predicted_ctr"]]
 
-        # ✅ CASE 2: Smart group-wise simulation
+        # Step 6: CASE 2 — Group-wise simulation fallback
         simulatable_cols = [col for col in input_df.columns if col in SIMULATABLE_FEATURES]
         if len(simulatable_cols) == 1:
             sim_col = simulatable_cols[0]
@@ -64,9 +64,10 @@ def run_sql_to_ctr_predictions(sql_query, spark_df):
                 row_dict["predicted_ctr"] = pred
                 prediction_rows.append(row_dict)
 
-            return pd.DataFrame(prediction_rows)[user_requested_cols + ["predicted_ctr"]]
+            result_df = pd.DataFrame(prediction_rows)
+            return result_df[user_requested_cols + ["predicted_ctr"]]
 
-        # ✅ CASE 3: No usable features, use full-mode fallback
+        # Step 7: CASE 3 — Nothing usable, fallback to smart row
         smart_row = spark_df.toPandas().mode(numeric_only=False).iloc[0].to_dict()
         sim_df = pd.DataFrame([smart_row])
         features_df = create_features(sim_df)
