@@ -10,73 +10,72 @@ DEFAULT_ROW = {
     "device_model": "model_abc",
     "site_id": "site_001",
     "app_id": "app_001",
-    "app_category": "07d7df22"  # Add default top category for simulation
+    "app_category": "07d7df22"  # default for group simulation
 }
 
-# Columns that can be safely simulated in fallback
 SIMULATABLE_FEATURES = {
     "device_type", "app_category", "day_of_week", "hour_of_day", "banner_pos"
 }
 
 def run_sql_to_ctr_predictions(sql_query, spark_df):
     try:
-        # Register SQL table
+        # Register temp view for SQL
         spark_df.createOrReplaceTempView("ctr_df")
-
-        # Run the GPT-generated SQL query
         input_df = spark.sql(sql_query).toPandas()
         user_requested_cols = input_df.columns.tolist()
 
-        # Fallback: SQL returned nothing
+        # Handle empty SQL result
         if input_df.empty:
             input_df = pd.DataFrame([DEFAULT_ROW])
             user_requested_cols = list(DEFAULT_ROW.keys())
 
-        # Normalize column names
+        # Clean up column names
         input_df.columns = [col.strip() for col in input_df.columns]
         user_requested_cols = [col.strip() for col in user_requested_cols]
 
-        # Drop any existing predicted_ctr columns (case-insensitive)
-        cols_to_drop = [col for col in input_df.columns if col.lower() == "predicted_ctr"]
-        input_df = input_df.drop(columns=cols_to_drop, errors="ignore")
+        # Drop duplicate predicted_ctr columns
+        input_df = input_df.drop(columns=[col for col in input_df.columns if col.lower() == "predicted_ctr"], errors="ignore")
         user_requested_cols = [col for col in user_requested_cols if col.lower() != "predicted_ctr"]
 
-        # CASE 1: Row-wise model inference (all or most features are present)
+        # ✅ CASE 1: Full row-level model inference
         if any(col in input_df.columns for col in REQUIRED_COLUMNS):
             for col in REQUIRED_COLUMNS:
                 if col not in input_df.columns:
                     input_df[col] = DEFAULT_ROW[col]
                 else:
                     input_df[col] = input_df[col].fillna(DEFAULT_ROW[col])
+
             features_df = create_features(input_df)
             booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
             preds = booster.predict(features_df)
             input_df["predicted_ctr"] = preds
             return input_df[user_requested_cols + ["predicted_ctr"]]
 
-        # CASE 2: Group-level simulation using simulatable column (like app_category, device_type, etc.)
+        # ✅ CASE 2: Smart group-wise fallback simulation
         simulatable_cols = [col for col in input_df.columns if col in SIMULATABLE_FEATURES]
         if len(simulatable_cols) == 1:
             sim_col = simulatable_cols[0]
             booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
-            pred_rows = []
+            predictions = []
 
             for _, row in input_df.iterrows():
                 sim_row = DEFAULT_ROW.copy()
                 sim_row[sim_col] = row[sim_col]
-                features_df = create_features(sim_row)
+                sim_df = pd.DataFrame([sim_row])  # ✅ Proper single-row DF
+                features_df = create_features(sim_df)
                 pred = booster.predict(features_df)[0]
-                row["predicted_ctr"] = pred
-                pred_rows.append(row)
 
-            result_df = pd.DataFrame(pred_rows)
-            return result_df[user_requested_cols + ["predicted_ctr"]]
+                row_dict = row.to_dict()
+                row_dict["predicted_ctr"] = pred
+                predictions.append(row_dict)
 
-        # CASE 3: No model features or simulatable fallback — just return single default prediction
+            return pd.DataFrame(predictions)[user_requested_cols + ["predicted_ctr"]]
+
+        # ✅ CASE 3: Nothing available — fallback to default row once
         booster = lgb.Booster(model_file="/databricks/driver/ctr-predictor-module/model/ctr_model.txt")
-        features_df = create_features(DEFAULT_ROW)
-        fallback_pred = booster.predict(features_df)[0]
-        input_df["predicted_ctr"] = fallback_pred
+        features_df = create_features(pd.DataFrame([DEFAULT_ROW]))
+        pred = booster.predict(features_df)[0]
+        input_df["predicted_ctr"] = pred
         return input_df[user_requested_cols + ["predicted_ctr"]]
 
     except Exception as e:
