@@ -3,18 +3,20 @@ import hashlib
 import json
 import os
 
-# Load CTR encoding map (fallback if missing)
+# Load CTR encoding map
 ENCODING_PATH = os.path.join("utils", "ctr_encoding_map.json")
 if os.path.exists(ENCODING_PATH):
     with open(ENCODING_PATH, 'r') as f:
         CTR_ENCODING = json.load(f)
 else:
     CTR_ENCODING = {
-        "device_model": {"model_abc": 0.02, "model_xyz": 0.08},
-        "device_type": {"1": 0.13, "0": 0.07}
+        "device_model": {"model_abc": 0.02},
+        "device_type": {"1": 0.13},
+        "site_id_count": {"site_001": 50},
+        "app_id_count": {"app_001": 100},
+        "hour_avg_click": {str(i): 0.17 for i in range(24)}  # default if hour maps missing
     }
 
-# Default fallback values
 DEFAULTS = {
     'hour': 1300,
     'banner_pos': 0,
@@ -35,39 +37,35 @@ def create_features(raw):
     else:
         raise ValueError("Input must be dict or DataFrame")
 
-    # Ensure all expected columns are present
     for col, default_val in DEFAULTS.items():
         if col not in df.columns:
             df[col] = default_val
         else:
-            df[col] = df[col].apply(lambda x: default_val if pd.isna(x) or x == "" or x is None else x)
+            df[col] = df[col].apply(lambda x: default_val if pd.isna(x) or x == "" else x)
 
     # Time features
     df['hour_of_day'] = df['hour'].astype(str).str[-2:].astype(int)
     df['day_of_week'] = df['hour'].astype(str).str[:2].astype(int) // 4 % 7
 
     # CTR encodings
-    model_ctr_map = CTR_ENCODING.get("device_model", {})
-    device_ctr_map = CTR_ENCODING.get("device_type", {})
+    model_ctr = CTR_ENCODING.get("device_model", {})
+    type_ctr = CTR_ENCODING.get("device_type", {})
+    df['device_model_ctr'] = df['device_model'].map(model_ctr).fillna(0.02)
+    df['device_type_ctr'] = df['device_type'].astype(str).map(type_ctr).fillna(0.13)
 
-    model_ctr_avg = sum(model_ctr_map.values()) / max(1, len(model_ctr_map))
-    device_ctr_avg = sum(device_ctr_map.values()) / max(1, len(device_ctr_map))
-
-    df['device_model_ctr'] = df['device_model'].map(model_ctr_map).fillna(model_ctr_avg)
-    df['device_type_ctr'] = df['device_type'].astype(str).map(device_ctr_map).fillna(device_ctr_avg)
-
-    # Hashed features
+    # Hashes
     df['device_model_hash'] = df['device_model'].apply(lambda x: hash_category(x))
     df['banner_x_device'] = df['banner_pos'].astype(str) + "_" + df['device_type'].astype(str)
     df['banner_x_device_hash'] = df['banner_x_device'].apply(lambda x: hash_category(x, mod=100_000))
 
-    # Count features
-    df['site_id_count'] = df['site_id'].map(df['site_id'].value_counts()) if 'site_id' in df.columns else 0
-    df['app_id_count'] = df['app_id'].map(df['app_id'].value_counts()) if 'app_id' in df.columns else 0
+    # ✅ Load global count encodings from training
+    site_count_map = CTR_ENCODING.get("site_id_count", {})
+    app_count_map = CTR_ENCODING.get("app_id_count", {})
+    hour_avg_click = CTR_ENCODING.get("hour_avg_click", {})
 
-    # Hour CTR (static fallback to global mean CTR if needed)
-    global_avg_ctr = 0.174
-    df['hour_avg_click'] = df['hour_of_day'].map(df.groupby('hour_of_day')['device_type'].count()).fillna(global_avg_ctr)
+    df['site_id_count'] = df['site_id'].map(site_count_map).fillna(50)
+    df['app_id_count'] = df['app_id'].map(app_count_map).fillna(100)
+    df['hour_avg_click'] = df['hour_of_day'].astype(str).map(hour_avg_click).fillna(0.174)
 
     expected_features = [
         'hour_of_day',
